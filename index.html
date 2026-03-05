@@ -1050,16 +1050,14 @@ function App() {
                   opacity: isActive ? 1 : 0.4,
                 }}>
                   <div style={{ fontSize: 10, color: t.textMuted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>{u.label}</div>
-                  <div style={{ fontSize: 30, fontWeight: 700, color: u.color, display: "flex", alignItems: "center", gap: 8 }}>
-                    {filteredTotals[u.label] ?? 0}
-                    {loading && <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: u.color, animation: "pulse 1.2s ease-in-out infinite" }} />}
-                  </div>
-                  <div style={{ fontSize: 10, color: t.textFaint, marginTop: 2 }}>{loading ? "loading…" : "PRs created"}</div>
-                  {userSummary[u.label] && (userSummary[u.label].files > 0 || lineStatsLoading) && (
-                    <div style={{ marginTop: 8, borderTop: `1px solid ${t.cardBorder}`, paddingTop: 8, fontSize: 10, color: t.textMuted, display: "flex", gap: 10 }}>
+                  <div style={{ fontSize: 30, fontWeight: 700, color: u.color }}>{filteredTotals[u.label] ?? 0}</div>
+                  <div style={{ fontSize: 10, color: t.textFaint, marginTop: 2 }}>PRs created</div>
+                  {(userSummary[u.label]?.files > 0 || lineStatsLoading) && (
+                    <div style={{ marginTop: 8, borderTop: `1px solid ${t.cardBorder}`, paddingTop: 8, fontSize: 10, color: t.textMuted, display: "flex", alignItems: "center", gap: 10 }}>
                       <span>{userSummary[u.label].files} files</span>
                       <span style={{ color: "#4ade80" }}>+{userSummary[u.label].added}</span>
                       <span style={{ color: "#f87171" }}>-{userSummary[u.label].removed}</span>
+                      {lineStatsLoading && <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: u.color, animation: "pulse 1.2s ease-in-out infinite" }} />}
                     </div>
                   )}
                 </div>
