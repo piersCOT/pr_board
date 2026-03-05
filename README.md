@@ -6,14 +6,19 @@ A static dashboard for visualising pull request activity from Azure DevOps. No b
 
 ## Features
 
+- **Project selector** — searchable dropdown in the header breadcrumb to switch between Azure DevOps projects; selection persisted in `localStorage`
+- **Repository filter** — multi-select searchable dropdown to filter PRs by repository within the selected project; breadcrumb reads `org / project / repo`
 - **Bar chart** of PRs created per day (auto-grouped by week for ranges over 60 days)
 - **Date range presets** — 7d, 14d, 30d, 90d, This month, Last month, or a custom range
-- **User management** — add users from an Azure DevOps org directory via searchable dropdown with keyboard navigation
-- **Persistent state** — selected users and PAT are saved in `localStorage` and survive page refreshes
+- **User management** — add users from an Azure DevOps org directory via searchable dropdown with keyboard navigation; distinct colours guaranteed for up to 10 users
+- **Persistent state** — selected project, users, theme, and PAT are saved in `localStorage` and survive page refreshes
 - **Clickable user filtering** — click user cards to filter the chart and PR table to specific people; click again to deselect; "clear filter" button resets
 - **PR table** — lists all PRs with title (linked to Azure DevOps), repository, status badge, and creation date
-- **Auto-fetch** — data refreshes automatically when users are added or the date range changes
-- **Loading overlays** — blurred overlay with pulsing dots appears over each section during fetch, keeping previous data visible
+- **File and line stats** — per-PR file count, lines added, and lines removed fetched in the background with a per-tile loading indicator; aggregated totals shown on each user card
+- **Three themes** — Green, Light, and Dark; switchable via header buttons, persisted across sessions
+- **Auto-fetch** — data refreshes automatically when users are added, the date range changes, or the project is switched
+- **Dynamic page title** — updates to `PR Activity · <project>` when you switch projects
+- **Hide admin users** — checkbox to filter out admin accounts from the user dropdown
 
 ## Getting started
 
@@ -61,7 +66,7 @@ This dashboard is safe to host publicly. Here is a full analysis:
 | Item | Risk | Notes |
 |------|------|-------|
 | Org name (`capitalontap`) | None | Public-facing identifier, not exploitable |
-| Project name (`CapitalOnTapTests`) | None | Requires authentication to access |
+| Default project name (`CapitalOnTapTests`) | None | Requires authentication to access; users can switch projects via dropdown |
 | Azure DevOps API endpoint patterns | None | Publicly documented APIs |
 | PAT generation link | None | Only works if the visitor is already authenticated to the org |
 
@@ -88,4 +93,4 @@ No SRI integrity hashes are set on CDN scripts. This is a minor hardening opport
 Browser localStorage (PAT) --> Azure DevOps REST API --> Browser (render)
 ```
 
-The PAT is sent only to `dev.azure.com` and `vssps.dev.azure.com` via HTTPS Basic auth headers. It is never sent to any other server, logged, or included in URLs.
+The PAT is sent only to `dev.azure.com`, `vssps.dev.azure.com`, and `vsaex.dev.azure.com` via HTTPS Basic auth headers. It is never sent to any other server, logged, or included in URLs.
