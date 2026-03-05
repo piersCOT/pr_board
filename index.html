@@ -1,0 +1,942 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PR Activity · CapitalOnTap</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>" />
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/prop-types@15/prop-types.min.js"></script>
+  <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body { font-family: 'JetBrains Mono', 'Fira Code', monospace; color: #e2e8f0; }
+    input, button { font-family: inherit; }
+    input:focus { outline: none; border-color: #38bdf8 !important; }
+    button { cursor: pointer; transition: opacity 0.15s; }
+    button:hover { opacity: 0.82; }
+    .remove-btn:hover { color: #f87171 !important; }
+    .preset-btn { transition: all 0.15s; }
+    .preset-btn:hover { border-color: #38bdf8 !important; color: #38bdf8 !important; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #0f172a; }
+    ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
+    @keyframes shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
+    .loading-overlay {
+      position: absolute; inset: -4px; z-index: 10;
+      background: rgba(2, 8, 23, 0.7);
+      backdrop-filter: blur(2px);
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 10px;
+      transition: opacity 0.2s;
+    }
+    .loading-dots { display: flex; gap: 6px; }
+    .loading-dots span {
+      width: 8px; height: 8px; border-radius: 50%; background: #38bdf8;
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+    .loading-dots span:nth-child(2) { animation-delay: 0.15s; }
+    .loading-dots span:nth-child(3) { animation-delay: 0.3s; }
+    .shimmer-bar {
+      height: 12px; border-radius: 4px; margin-bottom: 8px;
+      background: linear-gradient(90deg, #1e293b 25%, #334155 50%, #1e293b 75%);
+      background-size: 800px 100%;
+      animation: shimmer 1.5s infinite linear;
+    }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useCallback, useEffect, useRef, useMemo } = React;
+const {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid,
+  Tooltip, Legend, ResponsiveContainer
+} = Recharts;
+
+const ORG = "capitalontap";
+const PROJECT = "CapitalOnTapTests";
+const PALETTE_MAP = {
+  green:  ["#06b6d4", "#f472b6", "#a3e635", "#fb923c", "#818cf8", "#fbbf24"],
+  light:  ["#2563eb", "#dc2626", "#059669", "#d97706", "#7c3aed", "#db2777"],
+  dark:   ["#00ff88", "#ff0080", "#00bbff", "#ffaa00", "#cc44ff", "#ff4444"],
+};
+
+const THEMES = {
+  green: {
+    name: "Green",
+    bg: "#042f2e", cardBg: "#0f3d3c", cardBorder: "#115e59",
+    inputBg: "#042f2e", text: "#ccfbf1", textMuted: "#5eead4", textFaint: "#2dd4bf", textDim: "#14b8a6",
+    accent: "#06b6d4", accentBg: "#164e63",
+    gridLine: "#115e59", scrollTrack: "#0f3d3c", scrollThumb: "#115e59",
+    tooltipBg: "#0f3d3c", errBg: "#450a0a", errBorder: "#991b1b", errText: "#fca5a5",
+    overlayBg: "rgba(4, 47, 46, 0.75)",
+    radius: 8, cardPad: "18px 20px",
+  },
+  light: {
+    name: "Light",
+    bg: "#f8fafc", cardBg: "#ffffff", cardBorder: "#e2e8f0",
+    inputBg: "#f1f5f9", text: "#0f172a", textMuted: "#64748b", textFaint: "#94a3b8", textDim: "#cbd5e1",
+    accent: "#2563eb", accentBg: "#dbeafe",
+    gridLine: "#e2e8f0", scrollTrack: "#f1f5f9", scrollThumb: "#cbd5e1",
+    tooltipBg: "#ffffff", errBg: "#fef2f2", errBorder: "#fecaca", errText: "#dc2626",
+    overlayBg: "rgba(248, 250, 252, 0.75)",
+    radius: 10, cardPad: "20px 22px",
+  },
+  dark: {
+    name: "Dark",
+    bg: "#0a0a0a", cardBg: "#111111", cardBorder: "#222222",
+    inputBg: "#0a0a0a", text: "#f0f0f0", textMuted: "#888888", textFaint: "#666666", textDim: "#444444",
+    accent: "#00ff88", accentBg: "rgba(0, 255, 136, 0.1)",
+    gridLine: "#1a1a1a", scrollTrack: "#111111", scrollThumb: "#333333",
+    tooltipBg: "#111111", errBg: "rgba(255, 0, 0, 0.1)", errBorder: "#ff4444", errText: "#ff6666",
+    overlayBg: "rgba(10, 10, 10, 0.75)",
+    radius: 4, cardPad: "18px 20px",
+  },
+};
+
+const DEFAULT_USERS = [];
+
+const PRESETS = [
+  { label: "7d",         days: 7 },
+  { label: "14d",        days: 14 },
+  { label: "30d",        days: 30 },
+  { label: "90d",        days: 90 },
+  { label: "This month", id: "thisMonth" },
+  { label: "Last month", id: "lastMonth" },
+  { label: "Custom",     id: "custom" },
+];
+
+function getPresetRange(preset) {
+  const now = new Date();
+  if (preset.days) {
+    const from = new Date(now);
+    from.setDate(from.getDate() - preset.days);
+    from.setHours(0, 0, 0, 0);
+    return { from, to: new Date(now) };
+  }
+  if (preset.id === "thisMonth") {
+    return { from: new Date(now.getFullYear(), now.getMonth(), 1), to: new Date(now) };
+  }
+  if (preset.id === "lastMonth") {
+    return {
+      from: new Date(now.getFullYear(), now.getMonth() - 1, 1),
+      to:   new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59),
+    };
+  }
+  return { from: null, to: null };
+}
+
+function fmt(date) {
+  return date.toISOString().split("T")[0];
+}
+
+function fmtLabel(dateStr, totalDays) {
+  const d = new Date(dateStr + "T00:00:00");
+  if (totalDays <= 31) return `${d.getDate()}/${d.getMonth() + 1}`;
+  return `${d.getDate()}/${d.getMonth() + 1}/${String(d.getFullYear()).slice(2)}`;
+}
+
+async function fetchIdentityId(email, pat) {
+  const headers = { Authorization: "Basic " + btoa(":" + pat) };
+  const url = `https://vssps.dev.azure.com/${ORG}/_apis/identities?searchFilter=AccountName&filterValue=${encodeURIComponent(email)}&api-version=7.1`;
+  const res = await fetch(url, { headers });
+  if (!res.ok) throw new Error(`Identity lookup failed for ${email} (${res.status})`);
+  const data = await res.json();
+  const match = data.value?.[0];
+  if (!match) throw new Error(`No identity found for ${email}`);
+  return match.id;
+}
+
+async function fetchGraphUsers(pat) {
+  const headers = { Authorization: "Basic " + btoa(":" + pat) };
+
+  // Try Graph API first (requires Graph read scope)
+  try {
+    let users = [], token = null;
+    do {
+      const url = `https://vssps.dev.azure.com/${ORG}/_apis/graph/users?api-version=7.1-preview.1` + (token ? `&continuationToken=${token}` : "");
+      const res = await fetch(url, { headers });
+      if (!res.ok) throw new Error("graph_unavailable");
+      const data = await res.json();
+      users = users.concat(data.value || []);
+      token = res.headers.get("X-MS-ContinuationToken");
+    } while (token);
+    const result = users
+      .filter(u => u.subjectKind === "user" && u.mailAddress)
+      .sort((a, b) => a.displayName.localeCompare(b.displayName));
+    if (result.length) return result;
+  } catch (e) {}
+
+  // Fallback: project teams members (works with basic Code/read PAT)
+  try {
+    const teamsUrl = `https://dev.azure.com/${ORG}/_apis/projects/${PROJECT}/teams?api-version=7.1&$mine=false`;
+    const teamsRes = await fetch(teamsUrl, { headers });
+    if (teamsRes.ok) {
+      const teamsData = await teamsRes.json();
+      const teams = teamsData.value || [];
+      const memberMap = new Map();
+      await Promise.all(teams.map(async team => {
+        try {
+          const membersUrl = `https://dev.azure.com/${ORG}/_apis/projects/${PROJECT}/teams/${team.id}/members?api-version=7.1`;
+          const membersRes = await fetch(membersUrl, { headers });
+          if (!membersRes.ok) return;
+          const membersData = await membersRes.json();
+          for (const m of (membersData.value || [])) {
+            const email = m.identity?.uniqueName || m.uniqueName || '';
+            const name = m.identity?.displayName || m.displayName || '';
+            if (email.includes('@') && !memberMap.has(email)) {
+              memberMap.set(email, { displayName: name, mailAddress: email });
+            }
+          }
+        } catch (e) {}
+      }));
+      const result = [...memberMap.values()].sort((a, b) => a.displayName.localeCompare(b.displayName));
+      if (result.length) return result;
+    }
+  } catch (e) {}
+
+  // Last resort: user entitlements (requires Member Entitlement Management read scope)
+  try {
+    const url = `https://vsaex.dev.azure.com/${ORG}/_apis/userentitlements?api-version=7.1-preview.3&top=200`;
+    const res = await fetch(url, { headers });
+    if (res.ok) {
+      const data = await res.json();
+      const result = (data.value || data.members || [])
+        .filter(u => u.user?.mailAddress)
+        .map(u => ({ displayName: u.user.displayName, mailAddress: u.user.mailAddress }))
+        .sort((a, b) => a.displayName.localeCompare(b.displayName));
+      if (result.length) return result;
+    }
+  } catch (e) {}
+
+  return [];
+}
+
+async function fetchPRsForUser(userId, from, to, pat) {
+  const headers = { Authorization: "Basic " + btoa(":" + pat) };
+  const params = new URLSearchParams({
+    "searchCriteria.creatorId": userId,
+    "searchCriteria.status":    "all",
+    "searchCriteria.minTime":   from.toISOString(),
+    "searchCriteria.maxTime":   to.toISOString(),
+    "$top":                     "1000",
+    "api-version":              "7.1",
+  });
+  const url = `https://dev.azure.com/${ORG}/${PROJECT}/_apis/git/pullrequests?${params}`;
+  const res = await fetch(url, { headers });
+  if (!res.ok) throw new Error(`PR fetch failed (${res.status}) — check PAT scope`);
+  const data = await res.json();
+  return data.value || [];
+}
+
+async function fetchBlobText(repoName, blobId, pat) {
+  if (!blobId || blobId === "0000000000000000000000000000000000000000") return "";
+  const headers = { Authorization: "Basic " + btoa(":" + pat) };
+  const url = `https://dev.azure.com/${ORG}/${PROJECT}/_apis/git/repositories/${encodeURIComponent(repoName)}/blobs/${blobId}?api-version=7.1&$format=text`;
+  const res = await fetch(url, { headers });
+  if (!res.ok) return "";
+  return await res.text();
+}
+
+function countLineChanges(oldText, newText) {
+  const oldLines = oldText ? oldText.split("\n") : [];
+  const newLines = newText ? newText.split("\n") : [];
+  const freq = new Map();
+  for (const line of oldLines) freq.set(line, (freq.get(line) || 0) + 1);
+  let common = 0;
+  for (const line of newLines) {
+    const count = freq.get(line) || 0;
+    if (count > 0) { common++; freq.set(line, count - 1); }
+  }
+  return { added: newLines.length - common, removed: oldLines.length - common };
+}
+
+async function fetchPRLineStats(repoName, prId, pat) {
+  const headers = { Authorization: "Basic " + btoa(":" + pat) };
+  const base = `https://dev.azure.com/${ORG}/${PROJECT}/_apis/git/repositories/${encodeURIComponent(repoName)}/pullRequests/${prId}`;
+  const iterRes = await fetch(`${base}/iterations?api-version=7.1`, { headers });
+  if (!iterRes.ok) return null;
+  const iterData = await iterRes.json();
+  const iterations = iterData.value || [];
+  if (iterations.length === 0) return null;
+  const changesRes = await fetch(`${base}/iterations/${iterations.length}/changes?api-version=7.1`, { headers });
+  if (!changesRes.ok) return null;
+  const data = await changesRes.json();
+  const changes = (data.changeEntries || []).filter(c => c.changeTrackingId > 0);
+
+  // Fetch line stats for all files in parallel
+  const fileStats = await Promise.all(changes.map(async (change) => {
+    if (change.item?.gitObjectType === "tree") return { added: 0, removed: 0 };
+    const newId = change.item?.objectId;
+    const oldId = change.item?.originalObjectId;
+    const ct = (change.changeType || "").toLowerCase();
+    try {
+      if (ct.includes("delete") && !ct.includes("sourcedelete")) {
+        const content = await fetchBlobText(repoName, oldId, pat);
+        return { added: 0, removed: content.split("\n").length };
+      } else if (ct.includes("add") && !ct.includes("sourceadd")) {
+        const content = await fetchBlobText(repoName, newId, pat);
+        return { added: content.split("\n").length, removed: 0 };
+      } else {
+        const [oldContent, newContent] = await Promise.all([
+          fetchBlobText(repoName, oldId, pat),
+          fetchBlobText(repoName, newId, pat),
+        ]);
+        return countLineChanges(oldContent, newContent);
+      }
+    } catch (e) { return { added: 0, removed: 0 }; }
+  }));
+
+  const added = fileStats.reduce((sum, f) => sum + f.added, 0);
+  const removed = fileStats.reduce((sum, f) => sum + f.removed, 0);
+  return { files: changes.length, added, removed };
+}
+
+function buildChartData(users, userPRs, from, to) {
+  const days = [];
+  const cur = new Date(from); cur.setHours(0,0,0,0);
+  const end = new Date(to);   end.setHours(23,59,59,999);
+  while (cur <= end) { days.push(fmt(cur)); cur.setDate(cur.getDate() + 1); }
+
+  return days.map(day => {
+    const entry = { date: day };
+    for (const u of users) {
+      entry[u.label] = (userPRs[u.label] || []).filter(
+        pr => fmt(new Date(pr.creationDate)) === day
+      ).length;
+    }
+    return entry;
+  });
+}
+
+function collapseToWeeks(data, users) {
+  const weeks = {};
+  for (const d of data) {
+    const date = new Date(d.date + "T00:00:00");
+    const ws = new Date(date); ws.setDate(date.getDate() - date.getDay());
+    const key = fmt(ws);
+    if (!weeks[key]) { weeks[key] = { date: key }; users.forEach(u => { weeks[key][u.label] = 0; }); }
+    users.forEach(u => { weeks[key][u.label] += d[u.label] || 0; });
+  }
+  return Object.values(weeks);
+}
+
+const LoadingOverlay = ({ overlayBg }) => (
+  <div className="loading-overlay" style={overlayBg ? { background: overlayBg } : {}}>
+    <div className="loading-dots">
+      <span /><span /><span />
+    </div>
+  </div>
+);
+
+const CustomTooltip = ({ active, payload, label, t: theme }) => {
+  const tt = theme || THEMES.green;
+  if (!active || !payload?.length) return null;
+  return (
+    <div style={{
+      background: tt.tooltipBg, border: `1px solid ${tt.cardBorder}`,
+      padding: "10px 14px", borderRadius: 6,
+      fontSize: 12, color: tt.text,
+    }}>
+      <div style={{ color: tt.textMuted, marginBottom: 6, fontSize: 11 }}>{label}</div>
+      {payload.map(p => (
+        <div key={p.name} style={{ color: p.color, lineHeight: "1.9" }}>
+          {p.name}: <strong>{p.value}</strong>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+const PALETTE = PALETTE_MAP.green;
+
+function App() {
+  const [themeKey, setThemeKey]           = useState(() => localStorage.getItem("pr_board_theme") || "green");
+  const t = THEMES[themeKey];
+  const pal = PALETTE_MAP[themeKey];
+  const [pat, setPat]                     = useState(() => localStorage.getItem("pr_board_pat") || "");
+  const [patVisible, setPatVisible]       = useState(false);
+  const [users, setUsers]                 = useState(() => {
+    const saved = localStorage.getItem("pr_board_users");
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) {}
+    }
+    return DEFAULT_USERS.map((u, i) => ({ ...u, color: PALETTE[i % PALETTE.length] }));
+  });
+  const [dropdownOpen, setDropdownOpen]   = useState(false);
+  const [selectedPreset, setSelectedPreset] = useState(PRESETS[0]);
+  const [customFrom, setCustomFrom]       = useState("");
+  const [customTo, setCustomTo]           = useState(fmt(new Date()));
+  const [chartData, setChartData]         = useState([]);
+  const [totals, setTotals]               = useState({});
+  const [availableUsers, setAvailableUsers] = useState([]);
+  const [usersLoading, setUsersLoading]   = useState(false);
+  const [loading, setLoading]             = useState(false);
+  const [error, setError]                 = useState("");
+  const [fetched, setFetched]             = useState(false);
+  const [isWeekly, setIsWeekly]           = useState(false);
+  const [totalDays, setTotalDays]         = useState(7);
+  const [allPRs, setAllPRs]              = useState({});
+  const [filteredLabels, setFilteredLabels] = useState(new Set());
+  const [userSearch, setUserSearch]       = useState("");
+  const [highlightIdx, setHighlightIdx]   = useState(-1);
+  const [lineStats, setLineStats]         = useState({});
+  const [lineStatsLoading, setLineStatsLoading] = useState(false);
+  const [lineStatsProgress, setLineStatsProgress] = useState({ done: 0, total: 0 });
+  const [hideAdmin, setHideAdmin]         = useState(() => localStorage.getItem("pr_board_hide_admin") !== "false");
+
+  const debounceRef = useRef(null);
+  const prevUserCountRef = useRef(users.length);
+
+  // Load available users from Azure DevOps on first render
+  useEffect(() => {
+    if (!pat.trim()) return;
+    setUsersLoading(true);
+    fetchGraphUsers(pat).then(setAvailableUsers).catch(() => {}).finally(() => setUsersLoading(false));
+  }, []);
+
+  // Persist users to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem("pr_board_users", JSON.stringify(users));
+  }, [users]);
+
+  // Persist theme choice
+  useEffect(() => {
+    localStorage.setItem("pr_board_theme", themeKey);
+  }, [themeKey]);
+
+  // Persist hide admin choice
+  useEffect(() => {
+    localStorage.setItem("pr_board_hide_admin", hideAdmin);
+  }, [hideAdmin]);
+
+  // Auto-fetch with debounce when inputs change (skip on user removal)
+  useEffect(() => {
+    if (!pat.trim()) return;
+    const wasRemoval = users.length < prevUserCountRef.current;
+    prevUserCountRef.current = users.length;
+    if (wasRemoval) return;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => fetchData(), 400);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [users, selectedPreset, customFrom, customTo, pat]);
+
+  const getRange = useCallback(() => {
+    if (selectedPreset.id === "custom") {
+      if (!customFrom) return { from: null, to: null };
+      return { from: new Date(customFrom), to: new Date(customTo + "T23:59:59") };
+    }
+    return getPresetRange(selectedPreset);
+  }, [selectedPreset, customFrom, customTo]);
+
+  const addUser = u => {
+    if (users.some(u2 => u2.email === u.mailAddress)) return;
+    setUsers(prev => [...prev, { email: u.mailAddress, label: u.displayName.split(" ")[0], color: pal[prev.length % pal.length] }]);
+    setDropdownOpen(false);
+    setUserSearch("");
+  };
+
+  const removeUser = email => setUsers(prev => prev.filter(u => u.email !== email));
+
+  const toggleFilter = label => {
+    setFilteredLabels(prev => {
+      const next = new Set(prev);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      return next;
+    });
+  };
+
+  const fetchData = async () => {
+    if (!pat.trim()) { setError("Paste your ADO PAT token above"); return; }
+    const { from, to } = getRange();
+    if (!from || !to) { setError("Select or enter a valid date range"); return; }
+
+    setLoading(true); setError(""); setFetched(false);
+    setLineStats({}); setLineStatsLoading(false);
+    try {
+      const userPRs = {};
+      const newTotals = {};
+      for (const user of users) {
+        const id = await fetchIdentityId(user.email, pat);
+        const prs = await fetchPRsForUser(id, from, to, pat);
+        userPRs[user.label] = prs;
+        newTotals[user.label] = prs.length;
+      }
+      const days = Math.round((to - from) / 86400000);
+      let data = buildChartData(users, userPRs, from, to);
+      const weekly = days > 60;
+      if (weekly) data = collapseToWeeks(data, users);
+      setChartData(data);
+      setTotals(newTotals);
+      setAllPRs(userPRs);
+      setIsWeekly(weekly);
+      setTotalDays(days);
+      setFetched(true);
+      // Fire file counts in the background (non-blocking)
+      fetchLineStatsFor(userPRs, pat);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const flatPRs = useMemo(() => {
+    const result = [];
+    for (const u of users) {
+      const prs = allPRs[u.label] || [];
+      for (const pr of prs) {
+        result.push({
+          ...pr,
+          _userLabel: u.label,
+          _color: u.color,
+          _url: `https://dev.azure.com/${ORG}/${PROJECT}/_git/${encodeURIComponent(pr.repository?.name || "")}/pullrequest/${pr.pullRequestId}`,
+        });
+      }
+    }
+    result.sort((a, b) => new Date(b.creationDate) - new Date(a.creationDate));
+    if (filteredLabels.size > 0) {
+      return result.filter(pr => filteredLabels.has(pr._userLabel));
+    }
+    return result;
+  }, [allPRs, users, filteredLabels]);
+
+  // Per-user summary: aggregate files + lines from lineStats
+  const userSummary = useMemo(() => {
+    const summary = {};
+    for (const u of users) {
+      const prs = allPRs[u.label] || [];
+      let files = 0, added = 0, removed = 0;
+      for (const pr of prs) {
+        const key = `${pr.repository?.name}-${pr.pullRequestId}`;
+        const st = lineStats[key];
+        if (st) { files += st.files || 0; added += st.added || 0; removed += st.removed || 0; }
+      }
+      summary[u.label] = { files, added, removed };
+    }
+    return summary;
+  }, [allPRs, users, lineStats]);
+
+  const fetchLineStatsFor = async (userPRs, patToken) => {
+    const allPrs = [];
+    for (const prs of Object.values(userPRs)) {
+      for (const pr of prs) allPrs.push(pr);
+    }
+    if (!allPrs.length) return;
+    setLineStatsLoading(true);
+    setLineStatsProgress({ done: 0, total: allPrs.length });
+    const stats = {};
+    let done = 0;
+    for (const pr of allPrs) {
+      const key = `${pr.repository?.name}-${pr.pullRequestId}`;
+      try {
+        const s = await fetchPRLineStats(pr.repository?.name, pr.pullRequestId, patToken);
+        if (s) stats[key] = s;
+      } catch (e) {}
+      done++;
+      setLineStatsProgress({ done, total: allPrs.length });
+      setLineStats({ ...stats });
+    }
+    setLineStatsLoading(false);
+  };
+
+  const fetchLineStats = () => fetchLineStatsFor(allPRs, pat);
+
+  const s = {
+    card: { background: t.cardBg, border: `1px solid ${t.cardBorder}`, borderRadius: t.radius, padding: t.cardPad },
+    label: { fontSize: 10, color: t.textMuted, letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 10 },
+    input: {
+      background: t.inputBg, border: `1px solid ${t.cardBorder}`, borderRadius: 6,
+      padding: "8px 12px", color: t.text, fontSize: 13, width: "100%",
+    },
+  };
+
+  const thStyle = { textAlign: "left", padding: "8px 12px", color: t.textMuted, fontSize: 10, fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.1em" };
+
+  return (
+    <div style={{ background: t.bg, minHeight: "100vh", transition: "background 0.3s" }}>
+    <div style={{ padding: "32px 40px", maxWidth: 1320, margin: "0 auto" }}>
+
+      {/* Header */}
+      <div style={{ marginBottom: 28, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div>
+          <div style={{ fontSize: 11, color: t.textDim, letterSpacing: "0.15em", textTransform: "uppercase", marginBottom: 6 }}>
+            {ORG} / {PROJECT}
+          </div>
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: t.text, letterSpacing: "-0.02em" }}>
+            PR Activity
+          </h1>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {Object.entries(THEMES).map(([key, theme]) => (
+            <button key={key} onClick={() => setThemeKey(key)} style={{
+              background: key === themeKey ? t.accent : t.cardBg,
+              border: `1px solid ${key === themeKey ? t.accent : t.cardBorder}`,
+              borderRadius: 6, padding: "0 14px", fontSize: 11, height: 36, lineHeight: 1,
+              color: key === themeKey ? t.bg : t.textMuted,
+              fontWeight: key === themeKey ? 600 : 400,
+              transition: "all 0.2s",
+            }}>{theme.name}</button>
+          ))}
+          <button
+            onClick={fetchData}
+            disabled={loading}
+            title="Refresh data"
+            style={{
+              background: t.cardBg, border: `1px solid ${t.cardBorder}`, borderRadius: 6,
+              color: t.textMuted, padding: 0, fontSize: 18, lineHeight: 1,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              width: 36, height: 36, opacity: loading ? 0.6 : 1, marginLeft: 4,
+            }}
+          >
+            <span style={{ display: "inline-block", animation: loading ? "spin 1s linear infinite" : "none" }}>&#x21bb;</span>
+          </button>
+        </div>
+      </div>
+
+      {/* PAT + Date range row */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+
+        {/* PAT */}
+        <div style={s.card}>
+          <div style={{ ...s.label, display: "flex", alignItems: "center", gap: 6 }}>
+            Personal Access Token
+            <span style={{ position: "relative", cursor: "help" }}
+              onMouseEnter={e => e.currentTarget.querySelector('.pat-tip').style.display = 'block'}
+              onMouseLeave={e => e.currentTarget.querySelector('.pat-tip').style.display = 'none'}
+            >
+              <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 14, height: 14, borderRadius: "50%", border: `1px solid ${t.textFaint}`, fontSize: 9, color: t.textMuted, fontWeight: 700 }}>?</span>
+              <div className="pat-tip" style={{
+                display: "none", position: "absolute", top: "100%", left: "50%", transform: "translateX(-50%)", paddingTop: 8,
+                background: t.cardBg, border: `1px solid ${t.cardBorder}`, borderRadius: 6, padding: "12px 14px",
+                width: 280, fontSize: 11, color: t.text, lineHeight: 1.5, zIndex: 100, boxShadow: "0 8px 24px #00000066",
+              }}>
+                <div style={{ fontWeight: 700, marginBottom: 6, color: t.text }}>How to generate a PAT</div>
+                <div>1. Go to <a href="https://dev.azure.com/capitalontap/_usersSettings/tokens" target="_blank" rel="noopener noreferrer" style={{ color: t.accent, textDecoration: "none" }} onMouseEnter={e => e.currentTarget.style.textDecoration = "underline"} onMouseLeave={e => e.currentTarget.style.textDecoration = "none"}>dev.azure.com</a> → User Settings (top right) → Personal Access Tokens</div>
+                <div style={{ marginTop: 4 }}>2. Click <span style={{ color: t.accent }}>+ New Token</span></div>
+                <div style={{ marginTop: 4 }}>3. Set the scopes: <span style={{ color: t.accent }}>Code (Read)</span>, <span style={{ color: t.accent }}>Identity (Read)</span>, and <span style={{ color: t.accent }}>Graph (Read)</span></div>
+                <div style={{ marginTop: 4 }}>4. Copy the token and paste it here</div>
+                <div style={{ marginTop: 8, fontSize: 10, color: t.textMuted }}>Stored in your browser only — never sent to any server.</div>
+              </div>
+            </span>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              type={patVisible ? "text" : "password"}
+              value={pat}
+              onChange={e => { setPat(e.target.value); localStorage.setItem("pr_board_pat", e.target.value); }}
+              onBlur={e => { if (e.target.value.trim()) fetchGraphUsers(e.target.value).then(setAvailableUsers).catch(() => {}); }}
+              placeholder="paste PAT here..."
+              style={{ ...s.input, flex: 1 }}
+            />
+            <button
+              onClick={() => setPatVisible(v => !v)}
+              style={{ background: t.cardBg, border: `1px solid ${t.cardBorder}`, borderRadius: 6, color: t.textMuted, padding: "8px 12px", fontSize: 11 }}
+            >{patVisible ? "hide" : "show"}</button>
+          </div>
+        </div>
+
+        {/* Date range */}
+        <div style={s.card}>
+          <div style={s.label}>Date Range</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: selectedPreset.id === "custom" ? 10 : 0 }}>
+            {PRESETS.map(p => (
+              <button
+                key={p.label}
+                className="preset-btn"
+                onClick={() => setSelectedPreset(p)}
+                style={{
+                  background: selectedPreset.label === p.label ? t.accentBg : "transparent",
+                  border: `1px solid ${selectedPreset.label === p.label ? t.accent : t.cardBorder}`,
+                  borderRadius: 4,
+                  color: selectedPreset.label === p.label ? t.accent : t.textMuted,
+                  padding: "4px 10px", fontSize: 11,
+                }}
+              >{p.label}</button>
+            ))}
+          </div>
+          {selectedPreset.id === "custom" && (
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)}
+                style={{ flex: 1, ...s.input, padding: "6px 10px", fontSize: 12 }} />
+              <span style={{ color: t.textDim, fontSize: 11 }}>to</span>
+              <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)}
+                style={{ flex: 1, ...s.input, padding: "6px 10px", fontSize: 12 }} />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Users */}
+      <div style={{ ...s.card, marginBottom: 16 }}>
+        <div style={s.label}>Users</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: users.length ? 14 : 0 }}>
+          {users.map(u => (
+            <div key={u.email} style={{
+              display: "flex", alignItems: "center", gap: 8,
+              background: t.bg, border: `1px solid ${u.color}33`,
+              borderRadius: 6, padding: "6px 12px",
+            }}>
+              <div style={{ width: 8, height: 8, borderRadius: "50%", background: u.color, flexShrink: 0 }} />
+              <span style={{ fontSize: 12 }}>{u.label}</span>
+              <span style={{ fontSize: 10, color: t.textFaint }}>{u.email}</span>
+              <button className="remove-btn" onClick={() => removeUser(u.email)}
+                style={{ background: "none", border: "none", color: t.textDim, fontSize: 16, lineHeight: 1, padding: "0 2px" }}>×</button>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ position: "relative", display: "inline-block" }}
+          onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) { setDropdownOpen(false); setUserSearch(""); } }}
+          tabIndex={-1}
+        >
+          <button
+            onMouseDown={() => setDropdownOpen(v => !v)}
+            style={{ background: t.cardBg, border: `1px solid ${t.cardBorder}`, borderRadius: 6, color: t.textMuted, padding: "7px 16px", fontSize: 12, display: "flex", alignItems: "center", gap: 8 }}
+          >
+            + add user <span style={{ fontSize: 9, opacity: 0.6 }}>▾</span>
+          </button>
+          {dropdownOpen && (
+            <div style={{
+              position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 200,
+              background: t.cardBg, border: `1px solid ${t.cardBorder}`, borderRadius: t.radius,
+              minWidth: 300, maxHeight: 300, display: "flex", flexDirection: "column", boxShadow: "0 8px 24px #00000066",
+            }}>
+              {(() => {
+                const filtered = availableUsers.filter(u => {
+                  if (hideAdmin && u.mailAddress.toLowerCase().startsWith("admin")) return false;
+                  if (!userSearch.trim()) return true;
+                  const q = userSearch.toLowerCase();
+                  return u.displayName.toLowerCase().includes(q) || u.mailAddress.toLowerCase().includes(q);
+                });
+                const handleKey = e => {
+                  if (e.key === "ArrowDown") { e.preventDefault(); setHighlightIdx(i => Math.min(i + 1, filtered.length - 1)); }
+                  else if (e.key === "ArrowUp") { e.preventDefault(); setHighlightIdx(i => Math.max(i - 1, 0)); }
+                  else if (e.key === "Enter" && highlightIdx >= 0 && highlightIdx < filtered.length) {
+                    e.preventDefault();
+                    const u = filtered[highlightIdx];
+                    users.some(u2 => u2.email === u.mailAddress) ? removeUser(u.mailAddress) : addUser(u);
+                    setHighlightIdx(-1);
+                  } else if (e.key === "Escape") { setDropdownOpen(false); setUserSearch(""); setHighlightIdx(-1); }
+                };
+                return <>
+                <div style={{ padding: "8px 8px 4px", borderBottom: `1px solid ${t.cardBorder}`, flexShrink: 0 }}>
+                  <input
+                    ref={el => el && setTimeout(() => el.focus(), 0)}
+                    value={userSearch}
+                    onChange={e => { setUserSearch(e.target.value); setHighlightIdx(-1); }}
+                    onKeyDown={handleKey}
+                    onMouseDown={e => e.stopPropagation()}
+                    placeholder="Search name or email..."
+                    style={{ width: "100%", background: t.inputBg, border: `1px solid ${t.cardBorder}`, borderRadius: 4, padding: "6px 10px", color: t.text, fontSize: 12, fontFamily: "inherit" }}
+                  />
+                </div>
+                <div style={{ overflowY: "auto", flex: 1 }}>
+                {usersLoading
+                  ? <div style={{ padding: "10px 12px", fontSize: 12, color: t.textMuted }}>Loading users…</div>
+                  : filtered.length === 0
+                  ? <div style={{ padding: "10px 12px", fontSize: 12, color: t.textMuted }}>{availableUsers.length === 0 ? "No users loaded — PAT needs Identity (read) scope" : "No matches"}</div>
+                  : filtered.map((u, i) => (
+                    <div
+                      key={u.mailAddress}
+                      onMouseDown={() => users.some(u2 => u2.email === u.mailAddress) ? removeUser(u.mailAddress) : addUser(u)}
+                      style={{ padding: "8px 12px", fontSize: 12, cursor: "pointer", borderBottom: `1px solid ${t.cardBorder}`, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, opacity: users.some(u2 => u2.email === u.mailAddress) ? 0.35 : 1, background: i === highlightIdx ? t.cardBorder : "transparent" }}
+                      onMouseEnter={e => { e.currentTarget.style.background = t.cardBorder; setHighlightIdx(i); }}
+                      onMouseLeave={e => { if (i !== highlightIdx) e.currentTarget.style.background = "transparent"; }}
+                    >
+                      <span style={{ whiteSpace: "nowrap" }}>{u.displayName}</span>
+                      <span style={{ fontSize: 10, color: t.textFaint, whiteSpace: "nowrap" }}>{u.mailAddress}</span>
+                    </div>
+                  ))
+                }
+                </div>
+                </>;
+              })()}
+            </div>
+          )}
+        </div>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: t.textMuted, cursor: "pointer", userSelect: "none" }}>
+          <input type="checkbox" checked={hideAdmin} onChange={e => setHideAdmin(e.target.checked)}
+            style={{ accentColor: t.accent }} />
+          hide admin users
+        </label>
+        </div>
+      </div>
+
+      {/* Error */}
+      {error && (
+        <div style={{
+          background: t.errBg, border: `1px solid ${t.errBorder}`, borderRadius: t.radius,
+          padding: "12px 16px", color: t.errText, fontSize: 12, marginBottom: 20,
+        }}>{error}</div>
+      )}
+
+      {/* Results */}
+      {(fetched || loading) && (
+        <>
+          {/* Totals — clickable for filtering */}
+          <div style={{ position: "relative", display: "flex", gap: 12, marginBottom: 16 }}>
+            {loading && <LoadingOverlay overlayBg={t.overlayBg} />}
+            {users.map(u => {
+              const isActive = filteredLabels.size === 0 || filteredLabels.has(u.label);
+              return (
+                <div key={u.email} onClick={() => toggleFilter(u.label)} style={{
+                  ...s.card, flex: 1, cursor: "pointer", transition: "all 0.15s",
+                  border: `1px solid ${u.color}${isActive ? "66" : "22"}`,
+                  outline: filteredLabels.has(u.label) ? `2px solid ${u.color}` : "none",
+                  outlineOffset: -1,
+                  opacity: isActive ? 1 : 0.4,
+                }}>
+                  <div style={{ fontSize: 10, color: t.textMuted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>{u.label}</div>
+                  <div style={{ fontSize: 30, fontWeight: 700, color: u.color }}>{totals[u.label] ?? 0}</div>
+                  <div style={{ fontSize: 10, color: t.textFaint, marginTop: 2 }}>PRs created</div>
+                  {userSummary[u.label] && (userSummary[u.label].files > 0 || lineStatsLoading) && (
+                    <div style={{ marginTop: 8, borderTop: `1px solid ${t.cardBorder}`, paddingTop: 8, fontSize: 10, color: t.textMuted, display: "flex", gap: 10 }}>
+                      <span>{userSummary[u.label].files} files</span>
+                      <span style={{ color: "#4ade80" }}>+{userSummary[u.label].added}</span>
+                      <span style={{ color: "#f87171" }}>-{userSummary[u.label].removed}</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Chart */}
+          <div style={{ ...s.card, position: "relative" }}>
+            {loading && <LoadingOverlay overlayBg={t.overlayBg} />}
+            <div style={{ ...s.label, marginBottom: 20 }}>
+              PRs created {isWeekly ? "(grouped by week)" : "per day"}
+            </div>
+            <ResponsiveContainer width="100%" height={320}>
+              <BarChart data={chartData} barCategoryGap="30%" barGap={3}>
+                <CartesianGrid strokeDasharray="3 3" stroke={t.gridLine} vertical={false} />
+                <XAxis
+                  dataKey="date"
+                  tickFormatter={d => fmtLabel(d, totalDays)}
+                  tick={{ fill: t.textFaint, fontSize: 10, fontFamily: "JetBrains Mono, monospace" }}
+                  axisLine={{ stroke: t.gridLine }}
+                  tickLine={false}
+                  interval={totalDays <= 14 ? 0 : "preserveStartEnd"}
+                />
+                <YAxis
+                  allowDecimals={false}
+                  tick={{ fill: t.textFaint, fontSize: 10, fontFamily: "JetBrains Mono, monospace" }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <Tooltip content={<CustomTooltip t={t} />} cursor={{ fill: "#ffffff07" }} />
+                <Legend wrapperStyle={{ fontSize: 11, fontFamily: "JetBrains Mono, monospace", paddingTop: 16 }} />
+                {users.map(u => (
+                  <Bar key={u.label} dataKey={u.label} fill={u.color} radius={[3,3,0,0]} maxBarSize={36} />
+                ))}
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* PR List */}
+          <div style={{ ...s.card, marginTop: 16, position: "relative" }}>
+            {loading && <LoadingOverlay overlayBg={t.overlayBg} />}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <div style={{ ...s.label, marginBottom: 0 }}>Pull Requests</div>
+              <div style={{ display: "flex", gap: 6 }}>
+                {filteredLabels.size > 0 && (
+                  <button onClick={() => setFilteredLabels(new Set())} style={{
+                    background: "none", border: `1px solid ${t.cardBorder}`, borderRadius: 4,
+                    color: t.textMuted, fontSize: 10, padding: "3px 8px",
+                  }}>clear filter</button>
+                )}
+                <button onClick={fetchLineStats} disabled={lineStatsLoading} style={{
+                  background: "none", border: `1px solid ${t.cardBorder}`, borderRadius: 4,
+                  color: t.textMuted, fontSize: 10, padding: "3px 8px",
+                  opacity: lineStatsLoading ? 0.5 : 1,
+                }}>{lineStatsLoading ? `fetching file counts (${lineStatsProgress.done}/${lineStatsProgress.total})` : "refresh file counts"}</button>
+              </div>
+            </div>
+            {flatPRs.length === 0 && !loading ? (
+              <div style={{ textAlign: "center", padding: 24, color: t.textFaint, fontSize: 12 }}>No pull requests found</div>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ borderBottom: `1px solid ${t.cardBorder}` }}>
+                      <th style={thStyle}>User</th>
+                      <th style={thStyle}>PR Title</th>
+                      <th style={thStyle}>Repository</th>
+                      <th style={thStyle}>Status</th>
+                      <th style={thStyle}>Created</th>
+                      <th style={thStyle}>Files</th>
+                      <th style={thStyle}>Lines</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {flatPRs.map(pr => (
+                      <tr key={`${pr._userLabel}-${pr.pullRequestId}`} style={{ borderBottom: `1px solid ${t.cardBorder}22` }}
+                        onMouseEnter={e => e.currentTarget.style.background = `${t.cardBorder}33`}
+                        onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                      >
+                        <td style={{ padding: "8px 12px", whiteSpace: "nowrap" }}>
+                          <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: pr._color, marginRight: 8, verticalAlign: "middle" }} />
+                          {pr._userLabel}
+                        </td>
+                        <td style={{ padding: "8px 12px", maxWidth: 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          <a href={pr._url} target="_blank" rel="noopener noreferrer" style={{ color: t.accent, textDecoration: "none" }}
+                            onMouseEnter={e => e.currentTarget.style.textDecoration = "underline"}
+                            onMouseLeave={e => e.currentTarget.style.textDecoration = "none"}
+                          >{pr.title}</a>
+                        </td>
+                        <td style={{ padding: "8px 12px", color: t.textMuted, whiteSpace: "nowrap" }}>{pr.repository?.name || "—"}</td>
+                        <td style={{ padding: "8px 12px" }}>
+                          <span style={{
+                            padding: "2px 8px", borderRadius: 4, fontSize: 10,
+                            background: pr.status === "completed" ? "#052e16" : pr.status === "abandoned" ? "#450a0a" : t.accentBg,
+                            color: pr.status === "completed" ? "#4ade80" : pr.status === "abandoned" ? "#f87171" : t.accent,
+                          }}>{pr.status}</span>
+                        </td>
+                        <td style={{ padding: "8px 12px", color: t.textMuted, whiteSpace: "nowrap" }}>
+                          {new Date(pr.creationDate).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                        </td>
+                        {(() => {
+                          const key = `${pr.repository?.name}-${pr.pullRequestId}`;
+                          const st = lineStats[key];
+                          return <>
+                            <td style={{ padding: "8px 12px", color: t.textMuted, whiteSpace: "nowrap", fontSize: 11 }}>
+                              {st ? st.files : lineStatsLoading ? "..." : "—"}
+                            </td>
+                            <td style={{ padding: "8px 12px", whiteSpace: "nowrap", fontSize: 11 }}>
+                              {st ? <>
+                                <span style={{ color: "#4ade80" }}>+{st.added}</span>
+                                {" / "}
+                                <span style={{ color: "#f87171" }}>-{st.removed}</span>
+                              </> : lineStatsLoading ? "..." : "—"}
+                            </td>
+                          </>;
+                        })()}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
