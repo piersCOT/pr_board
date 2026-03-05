@@ -29,6 +29,8 @@
     @keyframes spin { to { transform: rotate(360deg); } }
     @keyframes pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
     @keyframes shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
+    @keyframes borderBreathe { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 50% { box-shadow: 0 0 8px 3px var(--breathe-color); } }
+    .card-loading { animation: borderBreathe 1.8s ease-in-out infinite; }
     .loading-overlay {
       position: absolute; inset: -4px; z-index: 10;
       background: rgba(2, 8, 23, 0.7);
@@ -396,9 +398,12 @@ function App() {
     return DEFAULT_USERS.map((u, i) => ({ ...u, color: PALETTE[i % PALETTE.length] }));
   });
   const [dropdownOpen, setDropdownOpen]   = useState(false);
-  const [selectedPreset, setSelectedPreset] = useState(PRESETS[0]);
-  const [customFrom, setCustomFrom]       = useState("");
-  const [customTo, setCustomTo]           = useState(fmt(new Date()));
+  const [selectedPreset, setSelectedPreset] = useState(() => {
+    const saved = localStorage.getItem("pr_board_preset");
+    return PRESETS.find(p => p.label === saved) || PRESETS[0];
+  });
+  const [customFrom, setCustomFrom]       = useState(() => localStorage.getItem("pr_board_custom_from") || "");
+  const [customTo, setCustomTo]           = useState(() => localStorage.getItem("pr_board_custom_to") || fmt(new Date()));
   const [chartData, setChartData]         = useState([]);
   const [totals, setTotals]               = useState({});
   const [availableUsers, setAvailableUsers] = useState([]);
@@ -424,13 +429,19 @@ function App() {
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [availableRepos, setAvailableRepos] = useState([]);
   const [reposLoading, setReposLoading]     = useState(false);
-  const [filteredRepos, setFilteredRepos]   = useState(new Set());
+  const [filteredRepos, setFilteredRepos]   = useState(() => {
+    const saved = localStorage.getItem("pr_board_filtered_repos");
+    if (saved) { try { return new Set(JSON.parse(saved)); } catch (e) {} }
+    return new Set();
+  });
   const [repoDropdownOpen, setRepoDropdownOpen] = useState(false);
   const [repoSearch, setRepoSearch]         = useState("");
   const [repoHighlightIdx, setRepoHighlightIdx] = useState(-1);
+  const [showAllLoading, setShowAllLoading] = useState(false);
 
   const debounceRef = useRef(null);
-  const prevUserCountRef = useRef(users.length);
+  const prevUsersRef = useRef(users);
+  const cacheLoadedRef = useRef(false);
 
   // Load available users from Azure DevOps on first render
   useEffect(() => {
@@ -450,7 +461,7 @@ function App() {
   useEffect(() => {
     if (!pat.trim() || !project) return;
     setReposLoading(true);
-    fetchRepos(pat, project).then(repos => { setAvailableRepos(repos); setFilteredRepos(new Set()); }).catch(() => {}).finally(() => setReposLoading(false));
+    fetchRepos(pat, project).then(repos => { setAvailableRepos(repos); }).catch(() => {}).finally(() => setReposLoading(false));
   }, [pat, project]);
 
   // Persist project to localStorage and update page title
@@ -474,14 +485,59 @@ function App() {
     localStorage.setItem("pr_board_hide_admin", hideAdmin);
   }, [hideAdmin]);
 
-  // Auto-fetch with debounce when inputs change (skip on user removal)
+  // Persist repo filter and date preset
+  useEffect(() => { localStorage.setItem("pr_board_filtered_repos", JSON.stringify([...filteredRepos])); }, [filteredRepos]);
+  useEffect(() => { localStorage.setItem("pr_board_preset", selectedPreset.label); }, [selectedPreset]);
+
+  // Restore cached fetch results on mount
+  useEffect(() => {
+    if (!pat.trim() || users.length === 0) return;
+    const { from, to } = getRange();
+    if (!from || !to) return;
+    const key = JSON.stringify({ project, repos: [...filteredRepos].sort(), from: fmt(from), to: fmt(to), users: users.map(u => u.email).sort() });
+    try {
+      if (localStorage.getItem("pr_board_cache_key") !== key) return;
+      const raw = localStorage.getItem("pr_board_cache_data");
+      if (!raw) return;
+      const cache = JSON.parse(raw);
+      setAllPRs(cache.allPRs || {});
+      setChartData(cache.chartData || []);
+      setTotals(cache.totals || {});
+      setLineStats(cache.lineStats || {});
+      setIsWeekly(cache.isWeekly || false);
+      setTotalDays(cache.totalDays || 7);
+      setFetched(true);
+      cacheLoadedRef.current = true;
+    } catch (e) {}
+  }, []);
+
+  // Persist lineStats into cache once they finish loading
+  useEffect(() => {
+    if (!fetched || lineStatsLoading) return;
+    try {
+      const raw = localStorage.getItem("pr_board_cache_data");
+      if (!raw) return;
+      const cached = JSON.parse(raw);
+      cached.lineStats = lineStats;
+      localStorage.setItem("pr_board_cache_data", JSON.stringify(cached));
+    } catch (e) {}
+  }, [lineStatsLoading, lineStats, fetched]);
+
+  // Auto-fetch with debounce when inputs change (skip on user removal; single-user add fetches only that user)
   useEffect(() => {
     if (!pat.trim()) return;
-    const wasRemoval = users.length < prevUserCountRef.current;
-    prevUserCountRef.current = users.length;
+    const prevUsers = prevUsersRef.current;
+    prevUsersRef.current = users;
+    if (cacheLoadedRef.current) { cacheLoadedRef.current = false; return; }
+    const wasRemoval = users.length < prevUsers.length;
     if (wasRemoval) return;
+    const addedUsers = users.filter(u => !prevUsers.some(p => p.email === u.email));
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => fetchData(), 400);
+    if (addedUsers.length === 1 && fetched) {
+      debounceRef.current = setTimeout(() => fetchDataForUser(addedUsers[0], allPRs, users), 400);
+    } else {
+      debounceRef.current = setTimeout(() => fetchData(), 400);
+    }
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
   }, [users, selectedPreset, customFrom, customTo, pat, project]);
 
@@ -530,6 +586,39 @@ function App() {
     });
   };
 
+  const fetchDataForUser = async (user, currentAllPRs, currentUsers) => {
+    if (!pat.trim()) return;
+    const { from, to } = getRange();
+    if (!from || !to) return;
+    setLoading(true); setError("");
+    try {
+      const id = await fetchIdentityId(user.email, pat);
+      const prs = await fetchPRsForUser(id, from, to, pat, project);
+      const mergedPRs = { ...currentAllPRs, [user.label]: prs };
+      const days = Math.round((to - from) / 86400000);
+      let data = buildChartData(currentUsers, mergedPRs, from, to);
+      const weekly = days > 60;
+      if (weekly) data = collapseToWeeks(data, currentUsers);
+      setChartData(data);
+      setTotals(prev => ({ ...prev, [user.label]: prs.length }));
+      setAllPRs(mergedPRs);
+      setIsWeekly(weekly);
+      setTotalDays(days);
+      setFetched(true);
+      try {
+        const ck = JSON.stringify({ project, repos: [...filteredRepos].sort(), from: fmt(from), to: fmt(to), users: currentUsers.map(u => u.email).sort() });
+        const prev = (() => { try { return JSON.parse(localStorage.getItem("pr_board_cache_data")) || {}; } catch (e) { return {}; } })();
+        localStorage.setItem("pr_board_cache_key", ck);
+        localStorage.setItem("pr_board_cache_data", JSON.stringify({ allPRs: mergedPRs, chartData: data, totals: { ...(prev.totals || {}), [user.label]: prs.length }, isWeekly: weekly, totalDays: days, lineStats: prev.lineStats || {} }));
+      } catch (e) {}
+      fetchLineStatsFor({ [user.label]: prs }, pat);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const fetchData = async () => {
     if (!pat.trim()) { setError("Paste your ADO PAT token above"); return; }
     const { from, to } = getRange();
@@ -556,6 +645,11 @@ function App() {
       setIsWeekly(weekly);
       setTotalDays(days);
       setFetched(true);
+      try {
+        const ck = JSON.stringify({ project, repos: [...filteredRepos].sort(), from: fmt(from), to: fmt(to), users: users.map(u => u.email).sort() });
+        localStorage.setItem("pr_board_cache_key", ck);
+        localStorage.setItem("pr_board_cache_data", JSON.stringify({ allPRs: userPRs, chartData: data, totals: newTotals, isWeekly: weekly, totalDays: days, lineStats: {} }));
+      } catch (e) {}
       // Fire file counts in the background (non-blocking)
       fetchLineStatsFor(userPRs, pat);
     } catch (e) {
@@ -632,12 +726,201 @@ function App() {
       } catch (e) {}
       done++;
       setLineStatsProgress({ done, total: allPrs.length });
-      setLineStats({ ...stats });
+      setLineStats(prev => ({ ...prev, ...stats }));
     }
     setLineStatsLoading(false);
   };
 
   const fetchLineStats = () => fetchLineStatsFor(allPRs, pat);
+
+  const downloadHtml = () => {
+    const snapshotDate = new Date().toLocaleString("en-GB");
+    const { from, to } = getRange();
+    const dateRangeText = from && to
+      ? `${from.toLocaleDateString("en-GB", {day:"numeric",month:"short",year:"numeric"})} – ${to.toLocaleDateString("en-GB", {day:"numeric",month:"short",year:"numeric"})}`
+      : selectedPreset.label;
+    const repoLabel = filteredRepos.size === 0 ? "all repos"
+      : filteredRepos.size === 1 ? [...filteredRepos][0]
+      : [...filteredRepos].join(", ");
+
+    // Capture live chart SVG, tagging bar elements by user color for JS filtering
+    const chartSvgEl = document.querySelector(".recharts-responsive-container svg");
+    let chartHtml = `<div style="padding:40px;text-align:center;color:${t.textFaint};font-size:12px">No chart data</div>`;
+    if (chartSvgEl) {
+      const rect = chartSvgEl.getBoundingClientRect();
+      const svgClone = chartSvgEl.cloneNode(true);
+      svgClone.setAttribute("width", Math.round(rect.width));
+      svgClone.setAttribute("height", Math.round(rect.height));
+      const colorToLabel = {};
+      users.forEach(u => { colorToLabel[u.color.toLowerCase()] = u.label; });
+      svgClone.querySelectorAll("[fill]").forEach(el => {
+        const fill = (el.getAttribute("fill") || "").toLowerCase();
+        if (colorToLabel[fill]) el.setAttribute("data-user", colorToLabel[fill]);
+      });
+      chartHtml = `<div style="width:100%">${svgClone.outerHTML}</div>`;
+    }
+
+    // User cards with data attributes for JS click-filtering
+    const sortedUsers = [...users].sort((a, b) => (filteredTotals[b.label] ?? 0) - (filteredTotals[a.label] ?? 0));
+    const userCardsHtml = sortedUsers.map(u => {
+      const sum = userSummary[u.label] || { files: 0, added: 0, removed: 0 };
+      const total = filteredTotals[u.label] ?? 0;
+      const fileStatsHtml = sum.files > 0
+        ? `<div style="margin-top:8px;border-top:1px solid ${t.cardBorder};padding-top:8px;font-size:10px;color:${t.textMuted};display:flex;align-items:center;gap:10px"><span>${sum.files} files</span><span style="color:#4ade80">+${sum.added}</span><span style="color:#f87171">-${sum.removed}</span></div>`
+        : "";
+      return `<div data-user-card="${u.label}" data-user-color="${u.color}" style="background:${t.cardBg};border:1px solid ${u.color}66;border-radius:${t.radius}px;padding:${t.cardPad};flex:1 1 130px;min-width:130px;cursor:pointer;transition:all 0.15s;outline-offset:-1px"><div style="font-size:10px;color:${t.textMuted};letter-spacing:0.1em;text-transform:uppercase;margin-bottom:4px">${u.label}</div><div style="font-size:30px;font-weight:700;color:${u.color}">${total}</div><div style="font-size:10px;color:${t.textFaint};margin-top:2px">PRs created</div>${fileStatsHtml}</div>`;
+    }).join("");
+
+    // PR table
+    const thSt = `text-align:left;padding:8px 12px;color:${t.textMuted};font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:0.1em`;
+    const prRowsHtml = flatPRs.map(pr => {
+      const key = `${pr.repository?.name}-${pr.pullRequestId}`;
+      const st = lineStats[key];
+      const statusBg = pr.status === "completed" ? "#052e16" : pr.status === "abandoned" ? "#450a0a" : t.accentBg;
+      const statusColor = pr.status === "completed" ? "#4ade80" : pr.status === "abandoned" ? "#f87171" : t.accent;
+      const dateStr = new Date(pr.creationDate).toLocaleDateString("en-GB", {day:"numeric",month:"short",year:"numeric"});
+      const linesCell = st ? `<span style="color:#4ade80">+${st.added}</span> / <span style="color:#f87171">-${st.removed}</span>` : "—";
+      return `<tr data-user-row="${pr._userLabel}" style="border-bottom:1px solid ${t.cardBorder}22"><td style="padding:8px 12px;white-space:nowrap"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${pr._color};margin-right:8px;vertical-align:middle"></span>${pr._userLabel}</td><td style="padding:8px 12px;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><a href="${pr._url}" target="_blank" rel="noopener noreferrer" style="color:${t.accent};text-decoration:none">${pr.title}</a></td><td style="padding:8px 12px;color:${t.textMuted};white-space:nowrap">${pr.repository?.name || "—"}</td><td style="padding:8px 12px"><span style="padding:2px 8px;border-radius:4px;font-size:10px;background:${statusBg};color:${statusColor}">${pr.status}</span></td><td style="padding:8px 12px;color:${t.textMuted};white-space:nowrap">${dateStr}</td><td style="padding:8px 12px;color:${t.textMuted};white-space:nowrap;font-size:11px">${st ? st.files : "—"}</td><td style="padding:8px 12px;white-space:nowrap;font-size:11px">${linesCell}</td></tr>`;
+    }).join("");
+
+    const cardSt = `background:${t.cardBg};border:1px solid ${t.cardBorder};border-radius:${t.radius}px;padding:${t.cardPad}`;
+    const labelSt = `font-size:10px;color:${t.textMuted};letter-spacing:0.12em;text-transform:uppercase`;
+    const scriptOpen = '<' + 'script>';
+    const scriptClose = '</' + 'script>';
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PR Activity · ${project} · ${snapshotDate}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body { font-family: 'JetBrains Mono', 'Fira Code', monospace; color: ${t.text}; background: ${t.bg}; }
+    a:hover { text-decoration: underline; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: ${t.scrollTrack}; }
+    ::-webkit-scrollbar-thumb { background: ${t.scrollThumb}; border-radius: 3px; }
+  </style>
+</head>
+<body>
+<div style="padding:32px 40px;max-width:1320px;margin:0 auto">
+  <div style="margin-bottom:28px;display:flex;justify-content:space-between;align-items:flex-start">
+    <div>
+      <div style="font-size:11px;color:${t.textDim};letter-spacing:0.15em;text-transform:uppercase;margin-bottom:6px">${ORG} / ${project} / ${repoLabel}</div>
+      <h1 style="font-size:22px;font-weight:700;color:${t.text};letter-spacing:-0.02em">PR Activity</h1>
+    </div>
+    <div style="text-align:right">
+      <div style="display:inline-block;background:${t.accentBg};border:1px solid ${t.accent}55;border-radius:6px;padding:5px 14px;font-size:11px;color:${t.accent};letter-spacing:0.05em">static snapshot</div>
+      <div style="margin-top:6px;font-size:11px;color:${t.textMuted}">${snapshotDate}</div>
+      <div style="margin-top:2px;font-size:11px;color:${t.textFaint}">${dateRangeText}</div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px">${userCardsHtml}</div>
+
+  <div style="${cardSt}">
+    <div style="${labelSt};margin-bottom:20px">PRs created ${isWeekly ? "(grouped by week)" : "per day"}</div>
+    ${chartHtml}
+  </div>
+
+  ${flatPRs.length > 0 ? `<div style="${cardSt};margin-top:16px">
+    <div style="${labelSt};margin-bottom:16px">Pull Requests</div>
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="border-bottom:1px solid ${t.cardBorder}"><th style="${thSt}">User</th><th style="${thSt}">PR Title</th><th style="${thSt}">Repository</th><th style="${thSt}">Status</th><th style="${thSt}">Created</th><th style="${thSt}">Files</th><th style="${thSt}">Lines</th></tr></thead>
+        <tbody>${prRowsHtml}</tbody>
+      </table>
+    </div>
+  </div>` : ""}
+</div>
+${scriptOpen}
+(function () {
+  var active = new Set();
+  document.querySelectorAll('[data-user-card]').forEach(function (card) {
+    card.addEventListener('click', function () {
+      var label = card.getAttribute('data-user-card');
+      if (active.has(label)) { active.delete(label); } else { active.add(label); }
+      update();
+    });
+  });
+  function update() {
+    document.querySelectorAll('[data-user-card]').forEach(function (card) {
+      var label = card.getAttribute('data-user-card');
+      var on = active.size === 0 || active.has(label);
+      card.style.opacity = on ? '1' : '0.4';
+      card.style.outline = active.has(label) ? ('2px solid ' + card.getAttribute('data-user-color')) : 'none';
+    });
+    document.querySelectorAll('tr[data-user-row]').forEach(function (row) {
+      var label = row.getAttribute('data-user-row');
+      row.style.display = (active.size === 0 || active.has(label)) ? '' : 'none';
+    });
+    document.querySelectorAll('[data-user]').forEach(function (el) {
+      var label = el.getAttribute('data-user');
+      el.style.opacity = (active.size === 0 || active.has(label)) ? '' : '0.15';
+    });
+  }
+}());
+${scriptClose}
+</body>
+</html>`;
+
+    const blob = new Blob([html], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `pr_board_${project}_${fmt(new Date())}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const showAllUsers = async () => {
+    if (!pat.trim() || availableUsers.length === 0) return;
+    const { from, to } = getRange();
+    if (!from || !to) return;
+    setShowAllLoading(true);
+    try {
+      const notAdded = availableUsers.filter(u => {
+        if (hideAdmin && u.mailAddress.toLowerCase().startsWith("admin")) return false;
+        return !users.some(u2 => u2.email === u.mailAddress);
+      });
+      const BATCH = 10;
+      const toAdd = [];
+      for (let i = 0; i < notAdded.length; i += BATCH) {
+        const batch = notAdded.slice(i, i + BATCH);
+        const results = await Promise.all(batch.map(async u => {
+          try {
+            const id = await fetchIdentityId(u.mailAddress, pat);
+            const prs = await fetchPRsForUser(id, from, to, pat, project);
+            const count = filteredRepos.size > 0
+              ? prs.filter(pr => filteredRepos.has(pr.repository?.name)).length
+              : prs.length;
+            return count > 0 ? u : null;
+          } catch (e) { return null; }
+        }));
+        toAdd.push(...results.filter(Boolean));
+      }
+      const currentFilteredTotals = filteredTotals;
+      setUsers(prev => {
+        // Remove existing users with 0 PRs (only when we have fetched data)
+        let next = fetched
+          ? prev.filter(u => (currentFilteredTotals[u.label] ?? 0) > 0)
+          : [...prev];
+        // Add new users with >0 PRs
+        for (const u of toAdd) {
+          if (next.some(u2 => u2.email === u.mailAddress)) continue;
+          const usedColors = new Set(next.map(u2 => u2.color));
+          const nextColor = pal.find(c => !usedColors.has(c)) || pal[next.length % pal.length];
+          next.push({ email: u.mailAddress, label: u.displayName.split(" ")[0], color: nextColor });
+        }
+        return next;
+      });
+    } catch (e) {}
+    setShowAllLoading(false);
+  };
 
   const s = {
     card: { background: t.cardBg, border: `1px solid ${t.cardBorder}`, borderRadius: t.radius, padding: t.cardPad },
@@ -854,6 +1137,16 @@ function App() {
           >
             <span style={{ display: "inline-block", animation: loading ? "spin 1s linear infinite" : "none" }}>&#x21bb;</span>
           </button>
+          <button
+            onClick={downloadHtml}
+            title="Download as HTML file"
+            style={{
+              background: t.cardBg, border: `1px solid ${t.cardBorder}`, borderRadius: 6,
+              color: t.textMuted, padding: 0, fontSize: 16, lineHeight: 1,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              width: 36, height: 36,
+            }}
+          >&#x2B07;</button>
         </div>
       </div>
 
@@ -920,10 +1213,10 @@ function App() {
           </div>
           {selectedPreset.id === "custom" && (
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)}
+              <input type="date" value={customFrom} onChange={e => { setCustomFrom(e.target.value); localStorage.setItem("pr_board_custom_from", e.target.value); }}
                 style={{ flex: 1, ...s.input, padding: "6px 10px", fontSize: 12 }} />
               <span style={{ color: t.textDim, fontSize: 11 }}>to</span>
-              <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)}
+              <input type="date" value={customTo} onChange={e => { setCustomTo(e.target.value); localStorage.setItem("pr_board_custom_to", e.target.value); }}
                 style={{ flex: 1, ...s.input, padding: "6px 10px", fontSize: 12 }} />
             </div>
           )}
@@ -934,7 +1227,7 @@ function App() {
       <div style={{ ...s.card, marginBottom: 16 }}>
         <div style={s.label}>Users</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: users.length ? 14 : 0 }}>
-          {users.map(u => (
+          {[...users].sort((a, b) => (filteredTotals[b.label] ?? 0) - (filteredTotals[a.label] ?? 0)).map(u => (
             <div key={u.email} style={{
               display: "flex", alignItems: "center", gap: 8,
               background: t.bg, border: `1px solid ${u.color}33`,
@@ -1023,6 +1316,17 @@ function App() {
             style={{ accentColor: t.accent }} />
           hide admin users
         </label>
+        <button
+          onClick={showAllUsers}
+          disabled={showAllLoading || !pat.trim() || availableUsers.length === 0}
+          title="Add all users with PRs in the current date range and repo filter"
+          style={{
+            background: t.cardBg, border: `1px solid ${t.cardBorder}`, borderRadius: 6,
+            color: showAllLoading ? t.accent : t.textMuted, padding: "7px 16px", fontSize: 12,
+            display: "flex", alignItems: "center", gap: 8,
+            opacity: (showAllLoading || !pat.trim() || availableUsers.length === 0) ? 0.5 : 1,
+          }}
+        >{showAllLoading ? "scanning..." : `show all PRs in ${filteredRepos.size > 0 ? [...filteredRepos].join(", ") : "all repos"} in ${selectedPreset.id === "custom" ? (customFrom ? `${customFrom} – ${customTo}` : "custom range") : selectedPreset.label}`}</button>
         </div>
       </div>
 
@@ -1038,16 +1342,23 @@ function App() {
       {(fetched || loading) && (
         <>
           {/* Totals — clickable for filtering */}
-          <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
-            {users.map(u => {
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
+            {[...users].sort((a, b) => (filteredTotals[b.label] ?? 0) - (filteredTotals[a.label] ?? 0)).map(u => {
               const isActive = filteredLabels.size === 0 || filteredLabels.has(u.label);
+              const cardIsLoading = loading || (lineStatsLoading && (allPRs[u.label] || []).some(pr => {
+                if (filteredRepos.size > 0 && !filteredRepos.has(pr.repository?.name)) return false;
+                return !lineStats[`${pr.repository?.name}-${pr.pullRequestId}`];
+              }));
               return (
-                <div key={u.email} onClick={() => toggleFilter(u.label)} style={{
-                  ...s.card, flex: 1, cursor: "pointer", transition: "all 0.15s",
+                <div key={u.email} onClick={() => toggleFilter(u.label)}
+                  className={cardIsLoading ? "card-loading" : ""}
+                  style={{
+                  ...s.card, flex: "1 1 130px", minWidth: 130, cursor: "pointer", transition: "all 0.15s",
                   border: `1px solid ${u.color}${isActive ? "66" : "22"}`,
                   outline: filteredLabels.has(u.label) ? `2px solid ${u.color}` : "none",
                   outlineOffset: -1,
                   opacity: isActive ? 1 : 0.4,
+                  "--breathe-color": u.color + "88",
                 }}>
                   <div style={{ fontSize: 10, color: t.textMuted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>{u.label}</div>
                   <div style={{ fontSize: 30, fontWeight: 700, color: u.color }}>{filteredTotals[u.label] ?? 0}</div>
