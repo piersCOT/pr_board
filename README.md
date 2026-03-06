@@ -89,3 +89,4 @@ Browser localStorage (PAT) --> Azure DevOps REST API --> Browser (render)
 ```
 
 The PAT is sent only to `dev.azure.com`, `vssps.dev.azure.com`, and `vsaex.dev.azure.com` via HTTPS Basic auth headers. It is never sent to any other server, logged, or included in URLs.
+
