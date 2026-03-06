@@ -421,6 +421,7 @@ function App() {
   const [lineStatsLoading, setLineStatsLoading] = useState(false);
   const [lineStatsProgress, setLineStatsProgress] = useState({ done: 0, total: 0 });
   const [hideAdmin, setHideAdmin]         = useState(() => localStorage.getItem("pr_board_hide_admin") !== "false");
+  const [excludeAbandoned, setExcludeAbandoned] = useState(false);
   const [project, setProject]             = useState(() => localStorage.getItem("pr_board_project") || DEFAULT_PROJECT);
   const [projectDropdownOpen, setProjectDropdownOpen] = useState(false);
   const [projectSearch, setProjectSearch] = useState("");
@@ -665,6 +666,7 @@ function App() {
       const prs = allPRs[u.label] || [];
       for (const pr of prs) {
         if (filteredRepos.size > 0 && !filteredRepos.has(pr.repository?.name)) continue;
+        if (excludeAbandoned && pr.status === "abandoned") continue;
         result.push({
           ...pr,
           _userLabel: u.label,
@@ -678,7 +680,7 @@ function App() {
       return result.filter(pr => filteredLabels.has(pr._userLabel));
     }
     return result;
-  }, [allPRs, users, filteredLabels, filteredRepos, project]);
+  }, [allPRs, users, filteredLabels, filteredRepos, project, excludeAbandoned]);
 
   // Per-user summary: aggregate files + lines from lineStats
   const userSummary = useMemo(() => {
@@ -688,6 +690,7 @@ function App() {
       let files = 0, added = 0, removed = 0;
       for (const pr of prs) {
         if (filteredRepos.size > 0 && !filteredRepos.has(pr.repository?.name)) continue;
+        if (excludeAbandoned && pr.status === "abandoned") continue;
         const key = `${pr.repository?.name}-${pr.pullRequestId}`;
         const st = lineStats[key];
         if (st) { files += st.files || 0; added += st.added || 0; removed += st.removed || 0; }
@@ -695,18 +698,37 @@ function App() {
       summary[u.label] = { files, added, removed };
     }
     return summary;
-  }, [allPRs, users, lineStats, filteredRepos]);
+  }, [allPRs, users, lineStats, filteredRepos, excludeAbandoned]);
 
-  // Filtered totals respecting repo filter
+  // Filtered totals respecting repo filter and excludeAbandoned
   const filteredTotals = useMemo(() => {
-    if (filteredRepos.size === 0) return totals;
+    if (filteredRepos.size === 0 && !excludeAbandoned) return totals;
     const ft = {};
     for (const u of users) {
       const prs = allPRs[u.label] || [];
-      ft[u.label] = prs.filter(pr => filteredRepos.has(pr.repository?.name)).length;
+      ft[u.label] = prs.filter(pr => {
+        if (filteredRepos.size > 0 && !filteredRepos.has(pr.repository?.name)) return false;
+        if (excludeAbandoned && pr.status === "abandoned") return false;
+        return true;
+      }).length;
     }
     return ft;
-  }, [totals, allPRs, users, filteredRepos]);
+  }, [totals, allPRs, users, filteredRepos, excludeAbandoned]);
+
+  // Chart data derived from allPRs so excludeAbandoned can filter it reactively
+  const displayChartData = useMemo(() => {
+    if (!excludeAbandoned || !chartData.length) return chartData;
+    const filteredPRs = {};
+    for (const [label, prs] of Object.entries(allPRs)) {
+      filteredPRs[label] = prs.filter(pr => pr.status !== "abandoned");
+    }
+    const dates = chartData.map(d => d.date).sort();
+    const from = new Date(dates[0] + "T00:00:00");
+    const to = new Date(dates[dates.length - 1] + "T23:59:59");
+    let data = buildChartData(users, filteredPRs, from, to);
+    if (isWeekly) data = collapseToWeeks(data, users);
+    return data;
+  }, [chartData, allPRs, excludeAbandoned, users, isWeekly]);
 
   const fetchLineStatsFor = async (userPRs, patToken) => {
     const allPrs = [];
@@ -1241,7 +1263,7 @@ ${scriptClose}
             </div>
           ))}
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <div style={{ position: "relative", display: "inline-block" }}
           onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) { setDropdownOpen(false); setUserSearch(""); } }}
           tabIndex={-1}
@@ -1316,17 +1338,24 @@ ${scriptClose}
             style={{ accentColor: t.accent }} />
           hide admin users
         </label>
-        <button
-          onClick={showAllUsers}
-          disabled={showAllLoading || !pat.trim() || availableUsers.length === 0}
-          title="Add all users with PRs in the current date range and repo filter"
-          style={{
-            background: t.cardBg, border: `1px solid ${t.cardBorder}`, borderRadius: 6,
-            color: showAllLoading ? t.accent : t.textMuted, padding: "7px 16px", fontSize: 12,
-            display: "flex", alignItems: "center", gap: 8,
-            opacity: (showAllLoading || !pat.trim() || availableUsers.length === 0) ? 0.5 : 1,
-          }}
-        >{showAllLoading ? "scanning..." : `show all PRs in ${filteredRepos.size > 0 ? [...filteredRepos].join(", ") : "all repos"} in ${selectedPreset.id === "custom" ? (customFrom ? `${customFrom} – ${customTo}` : "custom range") : selectedPreset.label}`}</button>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: t.textMuted, cursor: "pointer", userSelect: "none" }}>
+          <input type="checkbox" checked={excludeAbandoned} onChange={e => setExcludeAbandoned(e.target.checked)}
+            style={{ accentColor: t.accent }} />
+          exclude abandoned PRs
+        </label>
+        <div style={{ marginLeft: "auto" }}>
+          <button
+            onClick={showAllUsers}
+            disabled={showAllLoading || !pat.trim() || availableUsers.length === 0}
+            title="Add all users with PRs in the current date range and repo filter"
+            style={{
+              background: t.cardBg, border: `1px solid ${t.cardBorder}`, borderRadius: 6,
+              color: showAllLoading ? t.accent : t.textMuted, padding: "7px 16px", fontSize: 12,
+              display: "flex", alignItems: "center", gap: 8,
+              opacity: (showAllLoading || !pat.trim() || availableUsers.length === 0) ? 0.5 : 1,
+            }}
+          >{showAllLoading ? "scanning..." : `show all PRs in ${filteredRepos.size > 0 ? [...filteredRepos].join(", ") : "all repos"} in ${selectedPreset.id === "custom" ? (customFrom ? `${customFrom} – ${customTo}` : "custom range") : selectedPreset.label}`}</button>
+        </div>
         </div>
       </div>
 
@@ -1383,7 +1412,7 @@ ${scriptClose}
               PRs created {isWeekly ? "(grouped by week)" : "per day"}
             </div>
             <ResponsiveContainer width="100%" height={320}>
-              <BarChart data={chartData} barCategoryGap="30%" barGap={3}>
+              <BarChart data={displayChartData} barCategoryGap="30%" barGap={3}>
                 <CartesianGrid strokeDasharray="3 3" stroke={t.gridLine} vertical={false} />
                 <XAxis
                   dataKey="date"
